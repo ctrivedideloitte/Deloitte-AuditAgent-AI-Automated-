@@ -396,7 +396,14 @@ Kumar Raghavendra Venkata Raghav Aravapalli,vrkaravapalli@deloitte.com
 
   const baseInputRef = useRef<HTMLInputElement>(null);
 
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+  // Lazy initialization for Gemini AI
+  const getAI = () => {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key || key === 'MY_GEMINI_API_KEY' || key === '') {
+      throw new Error("Gemini API key is missing. Please configure it in the 'Secrets' panel in AI Studio.");
+    }
+    return new GoogleGenAI({ apiKey: key });
+  };
 
   // Persistence logic
   React.useEffect(() => {
@@ -687,8 +694,9 @@ Audit Team`;
       }));
 
       // 3. Run Audit with Gemini
+      const ai = getAI();
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-2.0-flash",
         contents: [
           {
             role: "user",
@@ -743,7 +751,8 @@ Audit Team`;
         }
       });
 
-      const parsedResults: AuditResult[] = JSON.parse(response.text || "[]");
+      const resultText = (response as any).text || (response as any).response?.text?.() || "";
+      const parsedResults: AuditResult[] = JSON.parse(resultText || "[]");
       setResults(parsedResults);
       saveCurrentSession(parsedResults);
       setView('audit-step-3');
