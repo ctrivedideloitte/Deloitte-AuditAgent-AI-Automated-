@@ -1,0 +1,6 @@
+{
+  "name": "Deloitte AuditAgent AI (Automated)",
+  "description": "Enterprise audit automation integrated with Microsoft Outlook and Google Sheets. Automatically ingest training reports and dispatch nudge emails.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["Outlook Integration", "Google Sheets Integration", "Gemini AI Data Extraction"]
+}

@@ -1,11 +1,54 @@
-<div align="center">
+# Audit Agent 🕵️‍♂️
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+A powerful, AI-driven reconciliation tool designed to streamline the training audit process. This application leverages the Gemini 3 Flash model to extract data from source reports (even PDFs!) and cross-reference them against internal directories to generate high-precision "nudge" communications.
 
-  <h1>Built with AI Studio</h2>
+## 🚀 Key Features
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+- **Automated Data Extraction**: Upload training reports in XLSX, CSV, or PDF format.
+- **PDF-to-Excel Intelligence**: Integrated AI-powered conversion that transforms unstructured PDFs into structured Excel data for better audit accuracy.
+- **Intelligent Matching**: Cross-references "File A" (Source) against "File B" (Directory) using fuzzy logic to find missing emails and contact details.
+- **Outlook Integration**: Automatically generates and dispatches professional reconciliation drafts directly to Microsoft Outlook.
+- **Session Persistence**: Saves your audits and CC memory locally so you never lose your progress.
+- **Optimized UI**: A sleek, Deloitte-inspired bento grid interface with collapsible sidebars and real-time processing feedback.
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+## 🛠 Tech Stack
 
-</div>
+- **Frontend**: React 18+ with Vite
+- **Styling**: Tailwind CSS
+- **Animations**: Framer Motion (motion/react)
+- **AI Engine**: Google Gemini 1.5 Flash
+- **Data Processing**: SheetJS (XLSX)
+- **Icons**: Lucide React
+
+## 📦 Getting Started
+
+### Prerequisites
+
+- Node.js 18+
+- npm or yarn
+
+### Installation
+
+1. Clone the repository:
+   ```bash
+   git clone <your-repo-url>
+   ```
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Create a `.env` file based on `.env.example` and add your Gemini API Key:
+   ```env
+   VITE_GEMINI_API_KEY=your_api_key_here
+   ```
+4. Start the development server:
+   ```bash
+   npm run dev
+   ```
+
+## 🔒 Data Privacy
+
+This tool is designed for professional audit contexts. Ensure you adhere to regional privacy protocols when handling internal employee data.
+
+---
+Built with ❤️ using Google AI Studio.
