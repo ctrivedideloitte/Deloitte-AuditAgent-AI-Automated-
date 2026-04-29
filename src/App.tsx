@@ -21,7 +21,9 @@ import { motion, AnimatePresence } from 'motion/react';
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
 interface AuditResult {
-  name: string;
+  firstName: string;
+  lastName: string;
+  candidateId: string;
   email: string;
   subject: string;
   body: string;
@@ -47,7 +49,7 @@ interface AuditSession {
 
 const DELOITTE_GREEN = "#86BC25";
 
-type AppView = 'login' | 'dashboard' | 'audit';
+type AppView = 'login' | 'dashboard' | 'audit-step-1' | 'audit-step-2' | 'audit-step-3';
 
 export default function App() {
   const [view, setView] = useState<AppView>('login');
@@ -59,12 +61,11 @@ export default function App() {
   const [authStatus, setAuthStatus] = useState({ microsoft: false, google: false });
   const [automationSettings, setAutomationSettings] = useState({
     subjectTrigger: localStorage.getItem('audit_subject_trigger') || "Training Report",
-    sourceId: localStorage.getItem('audit_sheet_id') || "" // Migrate existing key
+    sourceId: localStorage.getItem('audit_sheet_id') || "1a29I0sU51Awvnl2P2Pr8RXuQuftTW2WSKyXnK4yeQb0"
   });
   const [isSyncing, setIsSyncing] = useState(false);
 
-  const [baseFiles, setBaseFiles] = useState<File[]>([]);
-  const [targetFiles, setTargetFiles] = useState<File[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [instruction, setInstruction] = useState("The source file (File A) is a definitive list of people who have NOT completed training. Extract their First Name, Last Name, Training Name, and Training No. Then, find their email addresses in the Directory (File B) and create nudge emails for them.");
   const [results, setResults] = useState<AuditResult[]>([]);
   const [filter, setFilter] = useState<'all' | 'with-email' | 'no-email'>('all');
@@ -74,13 +75,8 @@ export default function App() {
   const [ccMemory, setCcMemory] = useState("");
   const [isDraftOpen, setIsDraftOpen] = useState(false);
   const [currentDraft, setCurrentDraft] = useState({ subject: "", body: "", cc: "" });
-  const [pdfToConvert, setPdfToConvert] = useState<File | null>(null);
-  const [isConverting, setIsConverting] = useState(false);
 
   const baseInputRef = useRef<HTMLInputElement>(null);
-  const addBaseInputRef = useRef<HTMLInputElement>(null);
-  const targetInputRef = useRef<HTMLInputElement>(null);
-  const addTargetInputRef = useRef<HTMLInputElement>(null);
 
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
@@ -146,7 +142,8 @@ export default function App() {
   }, [ccMemory]);
 
   const handleLogin = (name: string, email: string) => {
-    setCurrentUser({ name, email });
+    const emailLower = email.toLowerCase().trim();
+    setCurrentUser({ name, email: emailLower });
     setView('dashboard');
   };
 
@@ -154,9 +151,8 @@ export default function App() {
     const id = Math.random().toString(36).substring(7);
     setActiveSessionId(id);
     setResults([]);
-    setBaseFiles([]);
-    setTargetFiles([]);
-    setView('audit');
+    setUploadedFiles([]);
+    setView('audit-step-1');
   };
 
   const loadSession = (id: string) => {
@@ -165,7 +161,7 @@ export default function App() {
       setActiveSessionId(id);
       setResults(session.results);
       setInstruction(session.instruction);
-      setView('audit');
+      setView('audit-step-3');
     }
   };
 
@@ -262,166 +258,6 @@ export default function App() {
     });
   };
 
-  const convertPDFToExcel = async (file: File) => {
-    setIsConverting(true);
-    try {
-      const b64 = await fileToBase64(file);
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [{
-          role: "user",
-          parts: [
-            { inlineData: { data: b64, mimeType: "application/pdf" } },
-            { text: "Extract all individuals from this training report. For each person, find their Name, Training ID (if any), and the Person ID/Employee ID. Return as a JSON array of objects with keys: name, trainingId, personId." }
-          ]
-        }],
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING },
-                trainingId: { type: Type.STRING },
-                personId: { type: Type.STRING },
-              }
-            }
-          }
-        }
-      });
-
-      const data = JSON.parse(response.text || "[]");
-      const worksheet = XLSX.utils.json_to_sheet(data);
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, "ExtractedData");
-      
-      const fileName = file.name.replace('.pdf', '_converted.xlsx');
-      XLSX.writeFile(workbook, fileName);
-      
-      // Also add it to our base files
-      const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
-      const excelBlob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      const convertedFile = new File([excelBlob], fileName, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      setBaseFiles(prev => [...prev, convertedFile]);
-      setPdfToConvert(null);
-    } catch (err: any) {
-      console.error("Conversion Error:", err);
-      setError("Failed to convert PDF. Please try again.");
-    } finally {
-      setIsConverting(false);
-    }
-  };
-
-  const handleProcess = async () => {
-    if (baseFiles.length === 0 || targetFiles.length === 0) {
-      setError("Please upload at least one file for both Source and Target.");
-      return;
-    }
-
-    setIsProcessing(true);
-    setError(null);
-    setResults([]);
-
-    try {
-      const prepareFileParts = async (files: File[]) => {
-        return Promise.all(files.map(async (file) => {
-          const extension = file.name.split('.').pop()?.toLowerCase();
-          if (extension === 'pdf') {
-            const b64 = await fileToBase64(file);
-            return { inlineData: { data: b64, mimeType: "application/pdf" } };
-          } else {
-            const text = await extractTextFromFile(file);
-            return { text: `[DATA FROM ${file.name}]:\n${text.slice(0, 20000)}` };
-          }
-        }));
-      };
-
-      const [baseParts, targetParts] = await Promise.all([
-        prepareFileParts(baseFiles),
-        prepareFileParts(targetFiles)
-      ]);
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { text: "You are a Deloitte Audit Assistant. I am providing you with multiple Source (File A) and Target (File B) documents. Some are PDFs, others are CSV/Excel." },
-              ...baseParts,
-              ...targetParts,
-              {
-                text: `Your task is as follows:
-                1. EXHAUSTIVE EXTRACTION: Go through ALL provided Source Data (File A). You MUST extract "First Name", "Last Name", "Training No", and "Training Name" for EVERY SINGLE PERSON mentioned or listed in those documents. Do not miss anyone, even if the list is long.
-                2. NO ONE LEFT BEHIND: Even if you are 100% sure you cannot find a match in File B, you MUST still return that person in the output JSON array.
-                3. MATCHING: Cross-reference every name against the Directory Data (File B) to find their email address.
-                4. SUGGESTIONS (CRITICAL): If you cannot find an EXACT match but find people with SIMILAR names (e.g. "John Doe" vs "Jon Doe"), include those in the 'matchOptions' array with their name, email, and a reason/score.
-                5. STATUS & EMPTY EMAILS:
-                   - If a match is found: set status to 'matched' and provide the 'email'.
-                   - If NO match is found: set status to 'notfound', return the 'email' as an empty string (""), and populate 'matchOptions' with 1-3 best guesses from File B.
-                6. Use additional context: "${instruction}".
-                
-                CRITICAL: The output must be an EXHAUSTIVE list of everyone found in File A. If there are 50 names in File A, there must be 50 objects in your JSON response. DO NOT SUMMARIZE OR TRUNCATE THE LIST.
-                
-                REQUIRED OUTPUT (JSON Array):
-                - name: Full name (First + Last)
-                - email: Email address (EMPTY STRING if not found)
-                - subject: Professional reminder subject line
-                - body: Specific nudge body mentioning their training status
-                - trainingNo: Extracted Training No (or "N/A" if missing)
-                - trainingName: Name of the training session (e.g. "Ethics 2024")
-                - status: "matched" | "notfound"
-                - matchOptions: Array of { name: string, email: string, score: number } for potential matches if primary match is weak/missing.
-                
-                Strict JSON output format required.`
-              }
-            ]
-          }
-        ],
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING },
-                email: { type: Type.STRING },
-                subject: { type: Type.STRING },
-                body: { type: Type.STRING },
-                trainingNo: { type: Type.STRING },
-                trainingName: { type: Type.STRING },
-                status: { type: Type.STRING },
-                matchOptions: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      name: { type: Type.STRING },
-                      email: { type: Type.STRING },
-                      score: { type: Type.NUMBER }
-                    }
-                  }
-                }
-              },
-              required: ["name", "email", "subject", "body", "status"]
-            }
-          }
-        }
-      });
-
-      const parsedResults: AuditResult[] = JSON.parse(response.text || "[]");
-      setResults(parsedResults);
-      saveCurrentSession(parsedResults);
-    } catch (err: any) {
-      console.error("Processing Error:", err);
-      setError(err.message || "An unexpected error occurred.");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
   const updateResultEmail = (idx: number, email: string) => {
     setResults(prev => {
       const next = [...prev];
@@ -451,7 +287,8 @@ export default function App() {
     let tableRows = "";
     
     targets.forEach(r => {
-      const name = r.name.padEnd(17).slice(0, 17);
+      const fullName = `${r.firstName} ${r.lastName}`;
+      const name = fullName.padEnd(17).slice(0, 17);
       const email = r.email.padEnd(29).slice(0, 29);
       const tNo = (r.trainingNo || 'N/A').padEnd(11).slice(0, 11);
       const tName = (r.trainingName || 'N/A').padEnd(19).slice(0, 19);
@@ -478,12 +315,17 @@ Audit Team`;
   };
 
   const handleSyncAndTrigger = async () => {
-    if (!authStatus.microsoft) {
-      setError("Please connect Outlook first.");
+    if (!authStatus.google) {
+      setError("Please connect Google Sheets first. This is required for the Directory repository.");
+      handleConnect('google');
       return;
     }
     if (!automationSettings.sourceId) {
-      setError("Please provide a Google Sheet ID or SharePoint URL.");
+      setError("Please provide the Source of Truth Sheet ID.");
+      return;
+    }
+    if (uploadedFiles.length === 0) {
+      setError("Please upload at least one training file (PDF/Excel) to begin.");
       return;
     }
 
@@ -491,57 +333,57 @@ Audit Team`;
     setIsProcessing(true);
     setError(null);
     setResults([]);
+    setView('audit-step-2');
 
     try {
-      // 1. Fetch Attachment from Outlook
-      const outlookRes = await fetch(`/api/outlook/fetch-attachment?subject=${encodeURIComponent(automationSettings.subjectTrigger)}`);
-      if (!outlookRes.ok) throw new Error("Outlook sync failed: " + (await outlookRes.json()).error);
-      const outlookData = await outlookRes.json();
-      
-      // 2. Fetch Directory (Google Sheets or SharePoint)
-      let directoryText = "";
-      if (automationSettings.sourceId.includes('sharepoint.com')) {
-        const spRes = await fetch(`/api/microsoft/fetch-sharepoint?url=${encodeURIComponent(automationSettings.sourceId)}`);
-        if (!spRes.ok) throw new Error("SharePoint sync failed. Ensure the file is shared and Outlook is connected.");
-        const blob = await spRes.blob();
-        const arrayBuffer = await blob.arrayBuffer();
-        const workbook = XLSX.read(arrayBuffer);
-        workbook.SheetNames.forEach(name => {
-          directoryText += `Sheet: ${name}\n${XLSX.utils.sheet_to_csv(workbook.Sheets[name])}\n`;
-        });
-      } else {
-        if (!authStatus.google) throw new Error("Please connect Google Sheets to use a Sheet ID.");
-        const sheetRes = await fetch(`/api/sheets/fetch?sheetId=${automationSettings.sourceId}`);
-        if (!sheetRes.ok) throw new Error("Google Sheets sync failed: " + (await sheetRes.json()).error);
-        const sheetData = await sheetRes.json();
-        directoryText = `[DIRECTORY FROM GOOGLE SHEETS]:\n${JSON.stringify(sheetData.values)}`;
-      }
+      // 1. Fetch Directory from Google Sheets
+      const sheetRes = await fetch(`/api/sheets/fetch?sheetId=${automationSettings.sourceId}`);
+      if (!sheetRes.ok) throw new Error("Google Sheets sync failed: " + (await sheetRes.json()).error);
+      const sheetData = await sheetRes.json();
+      const directoryText = `[DIRECTORY REPOSITORY FROM GOOGLE SHEETS]:\n${JSON.stringify(sheetData.values)}`;
 
-      // 3. Prepare for Gemini
-      const sourcePart = { 
-        inlineData: { 
-          data: outlookData.contentBytes, 
-          mimeType: outlookData.contentType === 'application/pdf' ? 'application/pdf' : 'text/csv' 
-        } 
-      };
-      const directoryPart = { text: directoryText };
+      // 2. Prepare Uploaded Files
+      const fileParts = await Promise.all(uploadedFiles.map(async (file) => {
+        const extension = file.name.split('.').pop()?.toLowerCase();
+        if (extension === 'pdf') {
+          const b64 = await fileToBase64(file);
+          return { inlineData: { data: b64, mimeType: "application/pdf" } };
+        } else {
+          const text = await extractTextFromFile(file);
+          return { text: `[DATA FROM UPLOADED ${file.name}]:\n${text.slice(0, 30000)}` };
+        }
+      }));
 
-      // 4. Run Audit
+      // 3. Run Audit with Gemini
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: [
           {
             role: "user",
             parts: [
-              { text: "You are a Deloitte Audit Assistant. I am providing you with a Source file from Outlook and a Directory from either Google Sheets or SharePoint." },
-              sourcePart as any,
-              directoryPart,
+              { text: "You are a Deloitte Audit Assistant. I am providing you with one or more Source files (uploaded by the user) and a Directory Repository from Google Sheets." },
+              ...fileParts as any,
+              { text: directoryText },
               {
                 text: `Your task is as follows:
-                1. EXHAUSTIVE EXTRACTION: Go through ALL provided Source Data. You MUST extract "First Name", "Last Name", "Training No", and "Training Name" for EVERY SINGLE PERSON mentioned.
-                2. MATCHING: Cross-reference every name against the Directory to find their email address.
-                3. Use context: "${instruction}".
-                4. REQUIRED OUTPUT (JSON Array): name, email, subject, body, trainingNo, trainingName, status, matchOptions.`
+                1. EXHAUSTIVE EXTRACTION: Go through ALL provided Source Files. You MUST extract "First Name", "Last Name", "Candidate ID" (or Employee ID), "Training No", and "Training Name" for EVERY SINGLE PERSON mentioned as not having completed training.
+                2. MATCHING: Cross-reference every person against the Directory Repository to find their email address. Match using First Name, Last Name, and Candidate ID.
+                3. FUZZY MATCH: If names are slightly different but Candidate ID matches, consider it a match.
+                4. STATUS: 
+                   - 'matched' if you found an email.
+                   - 'notfound' if no email is found in the directory.
+                5. REQUIRED OUTPUT (JSON Array of objects):
+                   - firstName: string
+                   - lastName: string
+                   - candidateId: string
+                   - email: string (empty string if not found)
+                   - trainingNo: string
+                   - trainingName: string
+                   - subject: string (Reminder subject)
+                   - body: string (Nudge message)
+                   - status: "matched" | "notfound"
+                
+                Additional Context: "${instruction}".`
               }
             ]
           }
@@ -553,26 +395,17 @@ Audit Team`;
             items: {
               type: Type.OBJECT,
               properties: {
-                name: { type: Type.STRING },
+                firstName: { type: Type.STRING },
+                lastName: { type: Type.STRING },
+                candidateId: { type: Type.STRING },
                 email: { type: Type.STRING },
-                subject: { type: Type.STRING },
-                body: { type: Type.STRING },
                 trainingNo: { type: Type.STRING },
                 trainingName: { type: Type.STRING },
-                status: { type: Type.STRING },
-                matchOptions: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      name: { type: Type.STRING },
-                      email: { type: Type.STRING },
-                      score: { type: Type.NUMBER }
-                    }
-                  }
-                }
+                subject: { type: Type.STRING },
+                body: { type: Type.STRING },
+                status: { type: Type.STRING }
               },
-              required: ["name", "email", "subject", "body", "status"]
+              required: ["firstName", "lastName", "candidateId", "email", "status"]
             }
           }
         }
@@ -581,9 +414,11 @@ Audit Team`;
       const parsedResults: AuditResult[] = JSON.parse(response.text || "[]");
       setResults(parsedResults);
       saveCurrentSession(parsedResults);
+      setView('audit-step-3');
     } catch (err: any) {
       console.error("Automation Error:", err);
       setError(err.message);
+      setView('audit-step-1');
     } finally {
       setIsSyncing(false);
       setIsProcessing(false);
@@ -643,8 +478,8 @@ Audit Team`;
                 <>
                   <ChevronRight className="w-3 h-3 text-slate-700" />
                   <button 
-                    onClick={() => setView('audit')}
-                    className={`text-[10px] font-black uppercase tracking-widest px-2 ${view === 'audit' ? 'text-deloitte' : 'text-slate-400 hover:text-white'}`}
+                    onClick={() => setView('audit-step-3')}
+                    className={`text-[10px] font-black uppercase tracking-widest px-2 ${view.startsWith('audit-step') ? 'text-deloitte' : 'text-slate-400 hover:text-white'}`}
                   >
                     Active Audit
                   </button>
@@ -826,406 +661,301 @@ Audit Team`;
           </motion.div>
         )}
 
-        {view === 'audit' && (
+        {view === 'audit-step-1' && (
           <motion.div 
-            key="audit"
+            key="audit-step-1"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            className="flex-1 flex flex-col items-center justify-center p-12 overflow-y-auto"
+          >
+            <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-12">
+              <div className="space-y-8">
+                <div>
+                  <h2 className="text-6xl font-black tracking-tighter uppercase leading-none mb-4">Step 1<br />Ingestion<span className="text-deloitte">.</span></h2>
+                  <p className="text-slate-500 font-bold uppercase tracking-widest text-xs leading-relaxed">
+                    Upload the training report (PDF or Excel). This will be cross-referenced against our global Directory Repository.
+                  </p>
+                </div>
+
+                <div className="p-8 bg-black rounded-3xl border border-slate-800 space-y-6">
+                  <h3 className="text-xs font-black uppercase tracking-widest text-deloitte flex items-center gap-2">
+                    <div className="w-2 h-2 bg-deloitte rounded-full"></div>
+                    Directory Repository
+                  </h3>
+                  <div>
+                    <label className="text-[8px] font-black uppercase tracking-widest text-slate-500 block mb-2">Connected Source of Truth (Google Sheets)</label>
+                    <div className="flex gap-2">
+                      <input 
+                        value={automationSettings.sourceId}
+                        onChange={(e) => setAutomationSettings(s => ({ ...s, sourceId: e.target.value }))}
+                        className="flex-1 h-12 bg-slate-900 border border-slate-800 rounded-xl px-4 text-[11px] font-mono text-deloitte focus:border-deloitte focus:outline-none"
+                        placeholder="Google Sheet ID"
+                      />
+                      {!authStatus.google && (
+                        <button 
+                          onClick={() => handleConnect('google')}
+                          className="h-12 px-4 bg-slate-800 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-white hover:text-black transition-all"
+                        >
+                          Link
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                <div 
+                  onClick={() => baseInputRef.current?.click()}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const files = Array.from(e.dataTransfer.files);
+                    setUploadedFiles(prev => [...prev, ...files]);
+                  }}
+                  className="border-4 border-dashed border-slate-200 rounded-3xl p-16 flex flex-col items-center justify-center gap-6 hover:border-deloitte hover:bg-slate-50 transition-all cursor-pointer group relative bg-white shadow-sm"
+                >
+                  <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <Upload className="w-10 h-10 text-deloitte" />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-black uppercase tracking-widest">Drop Training File</p>
+                    <p className="text-[10px] font-bold text-slate-400 mt-2 uppercase tracking-widest">Supports PDF, XLSX, CSV</p>
+                  </div>
+                  <input type="file" multiple ref={baseInputRef} className="hidden" onChange={(e) => {
+                    const files = Array.from(e.target.files || []) as File[];
+                    setUploadedFiles(prev => [...prev, ...files]);
+                  }} />
+                </div>
+
+                {uploadedFiles.length > 0 && (
+                  <div className="space-y-2">
+                    {uploadedFiles.map((f, i) => (
+                      <motion.div 
+                        key={i} 
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="p-4 bg-white border border-slate-200 rounded-2xl flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-3 overflow-hidden">
+                          <FileText className="w-5 h-5 text-deloitte shrink-0" />
+                          <span className="text-xs font-bold truncate">{f.name}</span>
+                        </div>
+                        <button 
+                          onClick={() => setUploadedFiles(prev => prev.filter((_, idx) => idx !== i))}
+                          className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-red-500 transition-colors"
+                        >
+                          ×
+                        </button>
+                      </motion.div>
+                    ))}
+                    
+                    <button 
+                      onClick={handleSyncAndTrigger}
+                      disabled={isSyncing || uploadedFiles.length === 0}
+                      className="w-full h-20 bg-deloitte text-black rounded-3xl font-black uppercase tracking-[0.4em] hover:bg-black hover:text-white transition-all shadow-2xl mt-4 flex items-center justify-center gap-4 group active:scale-95"
+                    >
+                      {isSyncing ? <Loader2 className="w-6 h-6 animate-spin" /> : "Run Automated Audit"}
+                      {!isSyncing && <ArrowRight className="w-6 h-6 group-hover:translate-x-2 transition-transform" />}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+            {error && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-8 p-4 bg-red-50 border border-red-100 rounded-2xl flex gap-3 text-red-600 max-w-4xl w-full"
+              >
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span className="text-[10px] font-black uppercase tracking-widest">{error}</span>
+              </motion.div>
+            )}
+          </motion.div>
+        )}
+
+        {view === 'audit-step-2' && (
+          <motion.div 
+            key="audit-step-2"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="flex-1 flex overflow-hidden relative"
+            className="flex-1 flex flex-col items-center justify-center bg-black text-white"
           >
-            {/* Sidebar: Configuration */}
-            <motion.section 
-              animate={{ width: isSidebarCollapsed ? 0 : '33.3333%', opacity: isSidebarCollapsed ? 0 : 1 }}
-              className="bg-white border-r border-slate-200 flex flex-col overflow-y-auto shrink-0 transition-all duration-300"
-              style={{ padding: isSidebarCollapsed ? 0 : '2rem' }}
-            >
-              <div className="flex justify-between items-start">
-                {!isSidebarCollapsed && (
-                  <div>
-                    <h1 className="text-4xl font-black leading-none mb-2 tracking-tighter uppercase">Audit<br />Agent<span className="text-deloitte">.</span></h1>
-                    <p className="text-slate-500 text-sm font-medium italic">Active Reconstruction Phase</p>
-                  </div>
-                )}
+            <div className="relative w-64 h-64 mb-12">
+              <motion.div 
+                animate={{ rotate: 360 }}
+                transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+                className="absolute inset-0 border-[16px] border-slate-900 border-t-deloitte rounded-full shadow-[0_0_50px_rgba(134,188,37,0.3)]"
+              />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <Search className="w-20 h-20 text-deloitte animate-pulse" />
               </div>
-
-              {!isSidebarCollapsed && (
-                <div className="space-y-6 flex-1 flex flex-col">
-                  {/* Automation Panel */}
-                  <div className="p-4 bg-slate-900 rounded-2xl border border-slate-800 space-y-4">
-                    <div className="flex justify-between items-center">
-                      <h3 className="text-[10px] font-black uppercase tracking-widest text-deloitte flex items-center gap-2">
-                        <div className="w-2 h-2 bg-deloitte rounded-full animate-pulse"></div>
-                        Auto-Process Suite
-                      </h3>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <button 
-                        onClick={() => handleConnect('microsoft')}
-                        className={`h-10 rounded-xl text-[8px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${authStatus.microsoft ? 'bg-deloitte text-black' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
-                      >
-                        {authStatus.microsoft ? <CheckCircle2 className="w-3 h-3" /> : <Mail className="w-3 h-3" />}
-                        Outlook {authStatus.microsoft ? 'Linked' : 'Connect'}
-                      </button>
-                      <button 
-                        onClick={() => handleConnect('google')}
-                        className={`h-10 rounded-xl text-[8px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${authStatus.google ? 'bg-deloitte text-black' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
-                      >
-                        {authStatus.google ? <CheckCircle2 className="w-3 h-3" /> : <FileText className="w-3 h-3" />}
-                        Sheets {authStatus.google ? 'Linked' : 'Connect'}
-                      </button>
-                    </div>
-
-                    <div className="space-y-3">
-                      <div>
-                        <label className="text-[8px] font-black uppercase tracking-widest text-slate-500 block mb-1">Email Subject Trigger</label>
-                        <input 
-                          value={automationSettings.subjectTrigger}
-                          onChange={(e) => setAutomationSettings(s => ({ ...s, subjectTrigger: e.target.value }))}
-                          className="w-full h-10 bg-black border border-slate-800 rounded-lg px-3 text-[10px] font-mono text-deloitte focus:border-deloitte focus:outline-none"
-                          placeholder="e.g. Training Report"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[8px] font-black uppercase tracking-widest text-slate-500 block mb-1">Source of Truth (Sheet ID or SharePoint URL)</label>
-                        <input 
-                          value={automationSettings.sourceId}
-                          onChange={(e) => setAutomationSettings(s => ({ ...s, sourceId: e.target.value }))}
-                          className="w-full h-10 bg-black border border-slate-800 rounded-lg px-3 text-[10px] font-mono text-deloitte focus:border-deloitte focus:outline-none"
-                          placeholder="Spreadsheet ID or Deloitte SharePoint .xlsm URL"
-                        />
-                      </div>
-                    </div>
-
-                    <button 
-                      onClick={handleSyncAndTrigger}
-                      disabled={isSyncing || !authStatus.microsoft || !authStatus.google}
-                      className="w-full h-12 bg-white text-black rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-deloitte transition-all disabled:opacity-20 flex items-center justify-center gap-2 shadow-xl"
-                    >
-                      {isSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                      Sync & Automated Audit
-                    </button>
-                  </div>
-
-                  <div className="h-px bg-slate-100"></div>
-
-                  {/* Manual Section Label */}
-                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Manual Fallback Ingestion</div>
-                  <div>
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block flex justify-between">
-                      <span>Source Data (File A)</span>
-                    </label>
-                    
-                    {baseFiles.length > 0 ? (
-                      <div className="space-y-2">
-                         {baseFiles.map((f, i) => (
-                          <div key={i} className="p-4 bg-slate-900 rounded-xl text-white flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <FileText className="w-4 h-4 text-deloitte" />
-                              <span className="text-[10px] font-black uppercase tracking-widest truncate max-w-[150px]">{f.name}</span>
-                            </div>
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); setBaseFiles(baseFiles.filter((_, idx) => idx !== i)); }}
-                              className="text-slate-500 hover:text-white font-bold px-1"
-                            >
-                              ×
-                            </button>
-                          </div>
-                        ))}
-                        <button 
-                          onClick={() => addBaseInputRef.current?.click()}
-                          className="w-full p-4 border border-dashed border-slate-300 rounded-xl text-[9px] font-black uppercase tracking-widest hover:border-deloitte transition-colors flex items-center justify-center gap-2"
-                        >
-                          <Upload className="w-3 h-3" /> Add More Files
-                        </button>
-                        <input type="file" multiple ref={addBaseInputRef} className="hidden" onChange={(e) => {
-                          const newFiles = Array.from(e.target.files || []) as File[];
-                          const pdfs = newFiles.filter(f => f.name.toLowerCase().endsWith('.pdf'));
-                          if (pdfs.length > 0) setPdfToConvert(pdfs[0]);
-                          setBaseFiles(prev => [...prev, ...newFiles]);
-                        }} />
-                      </div>
-                    ) : (
-                      <div 
-                        onClick={() => baseInputRef.current?.click()}
-                        className="border-2 border-dashed border-slate-200 rounded-2xl p-10 flex flex-col items-center justify-center gap-4 hover:border-deloitte transition-all cursor-pointer group bg-slate-50/50 active:scale-95"
-                      >
-                        <div className="p-4 bg-white rounded-2xl shadow-sm group-hover:shadow-xl group-hover:-translate-y-1 transition-all">
-                          <Upload className="w-8 h-8 text-deloitte" />
-                        </div>
-                        <div className="text-center">
-                          <p className="text-[10px] font-black uppercase tracking-[0.2em]">Drop Source File</p>
-                          <p className="text-[9px] font-medium text-slate-400 mt-1 uppercase tracking-widest">XLSX, CSV, PDF (Limit 10MB)</p>
-                        </div>
-                        <input type="file" multiple ref={baseInputRef} className="hidden" onChange={(e) => {
-                          const newFiles = Array.from(e.target.files || []) as File[];
-                          const pdfs = newFiles.filter(f => f.name.toLowerCase().endsWith('.pdf'));
-                          if (pdfs.length > 0) setPdfToConvert(pdfs[0]);
-                          setBaseFiles(prev => [...prev, ...newFiles]);
-                        }} />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Target Files (File B) */}
-                  <div>
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block flex justify-between">
-                      <span>Target Directory (File B)</span>
-                    </label>
-
-                    {targetFiles.length > 0 ? (
-                      <div className="space-y-2">
-                         {targetFiles.map((f, i) => (
-                          <div key={i} className="p-4 border border-slate-200 rounded-xl text-slate-900 flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <Search className="w-4 h-4 text-deloitte" />
-                              <span className="text-[10px] font-black uppercase tracking-widest truncate max-w-[150px]">{f.name}</span>
-                            </div>
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); setTargetFiles(targetFiles.filter((_, idx) => idx !== i)); }}
-                              className="text-slate-400 hover:text-black font-bold px-1"
-                            >
-                              ×
-                            </button>
-                          </div>
-                        ))}
-                        <button 
-                          onClick={() => addTargetInputRef.current?.click()}
-                          className="w-full p-4 border border-dashed border-slate-300 rounded-xl text-[9px] font-black uppercase tracking-widest hover:border-deloitte transition-colors flex items-center justify-center gap-2"
-                        >
-                          <Upload className="w-3 h-3" /> Add Directory Files
-                        </button>
-                        <input type="file" multiple ref={addTargetInputRef} className="hidden" onChange={(e) => setTargetFiles(prev => [...prev, ...Array.from(e.target.files || [])])} />
-                      </div>
-                    ) : (
-                      <div 
-                        onClick={() => targetInputRef.current?.click()}
-                        className="border-2 border-dashed border-slate-200 rounded-2xl p-10 flex flex-col items-center justify-center gap-4 hover:border-deloitte transition-all cursor-pointer group bg-slate-50/50 active:scale-95"
-                      >
-                        <div className="p-4 bg-white rounded-2xl shadow-sm group-hover:shadow-xl group-hover:-translate-y-1 transition-all">
-                          <FileText className="w-8 h-8 text-slate-400 group-hover:text-deloitte" />
-                        </div>
-                        <div className="text-center">
-                          <p className="text-[10px] font-black uppercase tracking-[0.2em]">Upload Directory</p>
-                          <p className="text-[9px] font-medium text-slate-400 mt-1 uppercase tracking-widest">Internal DB, Lists, CSV</p>
-                        </div>
-                        <input type="file" multiple ref={targetInputRef} className="hidden" onChange={(e) => setTargetFiles(Array.from(e.target.files || []))} />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Scope Instruction */}
-                  <div>
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Processing Context</label>
-                    <textarea 
-                      value={instruction}
-                      onChange={(e) => setInstruction(e.target.value)}
-                      className="w-full h-32 bg-slate-50 border border-slate-200 rounded-2xl p-6 text-[11px] font-bold tracking-tight focus:outline-none focus:border-deloitte transition-all resize-none leading-relaxed"
-                      placeholder="Provide specific extraction or matching rules..."
+            </div>
+            
+            <div className="text-center space-y-4">
+              <h2 className="text-5xl font-black tracking-tighter uppercase leading-none">Step 2<br />Reconciliation<span className="text-deloitte">.</span></h2>
+              <div className="flex flex-col items-center gap-2">
+                <p className="text-slate-400 font-black uppercase text-[10px] tracking-[0.4em] animate-pulse">Cross-Referencing Repository</p>
+                <div className="flex gap-1">
+                  {[0, 1, 2].map(i => (
+                    <motion.div 
+                      key={i}
+                      animate={{ opacity: [0.2, 1, 0.2] }}
+                      transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
+                      className="w-1.5 h-1.5 bg-deloitte rounded-full"
                     />
-                  </div>
-
-                  <div className="mt-auto pt-4 border-t border-slate-100">
-                    <button 
-                      onClick={handleProcess}
-                      disabled={isProcessing || isConverting || baseFiles.length === 0 || targetFiles.length === 0}
-                      className="w-full h-20 bg-deloitte text-black rounded-2xl font-black uppercase tracking-[0.4em] hover:bg-black hover:text-white transition-all shadow-2xl disabled:opacity-30 disabled:grayscale disabled:scale-100 flex flex-col items-center justify-center relative overflow-hidden group active:scale-95"
-                    >
-                      <span className="relative z-10 text-xs">{isProcessing ? 'Analyzing Patterns...' : 'Run Audit Process'}</span>
-                      <span className="text-[8px] opacity-40 font-black relative z-10 tracking-widest mt-1 uppercase">
-                        {isProcessing ? 'Extracting Data Points' : 'Execute Reconstruction'}
-                      </span>
-                      
-                      {isProcessing && (
-                        <motion.div 
-                          className="absolute inset-0 bg-white/30 skew-x-12"
-                          animate={{ x: ['-100%', '200%'] }}
-                          transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
-                        />
-                      )}
-                    </button>
-                    
-                    {error && (
-                      <motion.div 
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="mt-4 p-4 bg-red-50 border border-red-100 rounded-xl flex gap-3 text-red-600"
-                      >
-                        <AlertCircle className="w-4 h-4 shrink-0" />
-                        <span className="text-[9px] font-black uppercase tracking-widest leading-none">{error}</span>
-                      </motion.div>
-                    )}
-                  </div>
-                  <p className="text-[9px] font-bold text-slate-400 text-center uppercase tracking-widest leading-relaxed mt-4">
-                    By executing, you confirm data adherence<br />to regional privacy protocols.
-                  </p>
+                  ))}
                 </div>
-              )}
-            </motion.section>
+              </div>
+            </div>
+            
+            <div className="mt-20 max-w-lg w-full px-8">
+              <div className="h-1 bg-slate-900 rounded-full overflow-hidden">
+                <motion.div 
+                  initial={{ width: "0%" }}
+                  animate={{ width: "100%" }}
+                  transition={{ duration: 8, ease: "easeInOut" }}
+                  className="h-full bg-deloitte"
+                />
+              </div>
+              <p className="text-[8px] font-black uppercase text-slate-600 mt-4 tracking-widest flex justify-between">
+                <span>Ingesting Source Data</span>
+                <span>Gemini 3 Flash Environment</span>
+              </p>
+            </div>
+          </motion.div>
+        )}
 
-          {/* Sidebar Collapse Toggle */}
-          <button 
-            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            className="absolute top-1/2 -translate-y-1/2 z-50 bg-black text-white p-2 rounded-r-xl shadow-2xl hover:bg-deloitte hover:text-black transition-all flex items-center justify-center active:scale-75"
-            style={{ left: isSidebarCollapsed ? 0 : '33.3333%' }}
+        {view === 'audit-step-3' && (
+          <motion.div 
+            key="audit-step-3"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="flex-1 flex flex-col overflow-hidden"
           >
-            <ChevronRight className={`w-4 h-4 transition-transform duration-500 ${isSidebarCollapsed ? '' : 'rotate-180'}`} />
-          </button>
-
-          {/* Main Content: Results View */}
-            <section className="flex-1 bg-slate-50 p-8 flex flex-col gap-6 overflow-hidden">
-               <div className="flex justify-between items-end">
-                <div className="flex flex-col gap-4">
-                  <div>
-                    <h2 className="text-6xl font-black tracking-tighter uppercase leading-[0.8] mb-2">Results<span className="text-deloitte">.</span></h2>
-                    <p className="text-slate-400 font-black uppercase text-[10px] tracking-[0.3em]">
-                      {results.length > 0 ? `${results.length} INDIVIDUALS IDENTIFIED IN SOURCE DATA` : 'AWAITING DATA INGESTION'}
-                    </p>
-                  </div>
-                  
-                  {results.length > 0 && (
-                    <div className="flex gap-2 p-1 bg-slate-200 rounded-lg w-fit">
-                      {[
-                        { id: 'all', label: 'All Users' },
-                        { id: 'with-email', label: 'Matched' },
-                        { id: 'no-email', label: 'Missing Email' }
-                      ].map((f) => (
-                        <button
-                          key={f.id}
-                          onClick={() => setFilter(f.id as any)}
-                          className={`px-4 py-2 rounded-md text-[10px] font-black uppercase tracking-widest transition-all ${
-                            filter === f.id 
-                            ? 'bg-black text-white shadow-lg' 
-                            : 'text-slate-500 hover:bg-slate-300'
-                          }`}
-                        >
-                          {f.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                {results.length > 0 && (
-                  <button 
-                    onClick={handleMasterDraft}
-                    className="px-10 py-5 bg-deloitte text-black rounded-lg text-xs font-black uppercase tracking-[0.2em] hover:bg-black hover:text-white transition-all shadow-2xl active:scale-95 flex items-center gap-3"
-                  >
-                    <Mail className="w-4 h-4" />
-                    Master Draft (BCC)
-                  </button>
-                )}
+            <div className="bg-white border-b border-slate-200 p-8 flex justify-between items-end">
+              <div>
+                <h2 className="text-6xl font-black tracking-tighter uppercase leading-none mb-2">Step 3<br />Results<span className="text-deloitte">.</span></h2>
+                <p className="text-slate-400 font-black uppercase text-[10px] tracking-[0.3em]">
+                  {results.length} INDIVIDUALS IDENTIFIED · {results.filter(r => r.status === 'matched').length} MATCHED
+                </p>
               </div>
 
-              <div className="flex-1 bg-white border border-slate-200 rounded-2xl overflow-hidden flex flex-col">
-                <div className="grid grid-cols-12 px-8 py-4 bg-slate-100 border-b border-slate-200 text-[9px] font-black uppercase tracking-widest text-slate-500 shrink-0">
+              <div className="flex items-center gap-4">
+                <div className="flex gap-2 p-1 bg-slate-100 rounded-xl">
+                  {[
+                    { id: 'all', label: 'All' },
+                    { id: 'with-email', label: 'Matched' },
+                    { id: 'no-email', label: 'Missing' }
+                  ].map((f) => (
+                    <button
+                      key={f.id}
+                      onClick={() => setFilter(f.id as any)}
+                      className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                        filter === f.id 
+                        ? 'bg-black text-white shadow-lg' 
+                        : 'text-slate-500 hover:bg-white'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+                <button 
+                  onClick={handleMasterDraft}
+                  className="h-14 px-8 bg-deloitte text-black rounded-xl text-xs font-black uppercase tracking-[0.2em] hover:bg-black hover:text-white transition-all shadow-xl flex items-center gap-3 active:scale-95"
+                >
+                  <Mail className="w-5 h-5" />
+                  Bulk Dispatch (Outlook)
+                </button>
+                <button 
+                  onClick={() => setView('audit-step-1')}
+                  className="h-14 px-6 border border-slate-200 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-slate-50 transition-all text-slate-400"
+                >
+                  New Audit
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 bg-slate-50 overflow-y-auto p-8 pt-0">
+              <div className="max-w-6xl mx-auto py-8">
+                <div className="grid grid-cols-12 px-8 py-4 text-[9px] font-black uppercase tracking-widest text-slate-400 shrink-0 mb-4 bg-transparent">
+                  <div className="col-span-1">ID</div>
                   <div className="col-span-4">Audit Target</div>
-                  <div className="col-span-5">Matched Email / Suggestions</div>
-                  <div className="col-span-3 text-right">Actions</div>
+                  <div className="col-span-4">Repository Match</div>
+                  <div className="col-span-3 text-right">Dispatch Status</div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
-                  {isProcessing ? (
-                    <div className="h-full flex flex-col items-center justify-center p-20 text-center">
-                      <div className="w-12 h-12 border-4 border-slate-100 border-t-deloitte rounded-full animate-spin mb-6"></div>
-                      <p className="font-black text-2xl tracking-tighter uppercase">CROSS-REFERENCING DOCUMENTS</p>
-                      <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-2 animate-pulse font-mono">Multimodal Extraction in Progress...</p>
-                    </div>
-                  ) : results.length > 0 ? (
-                    results
-                      .filter(res => {
-                        if (filter === 'with-email') return res.status === 'matched' || res.status === 'manual' || res.status === 'similar' || !!res.email;
-                        if (filter === 'no-email') return res.status === 'notfound' && !res.email;
-                        return true;
-                      })
-                      .map((res, idx) => (
-                      <motion.div 
-                        key={idx}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        className="grid grid-cols-12 px-8 py-8 items-center hover:bg-slate-50 transition-colors group"
-                      >
-                        <div className="col-span-4">
-                          <p className="font-black text-2xl tracking-tighter leading-none mb-1 uppercase">{res.name}</p>
-                          <div className="flex gap-2 items-center">
-                            <span className="px-2 py-1 bg-slate-100 text-slate-500 rounded text-[8px] font-black uppercase tracking-widest leading-none">
-                              {res.trainingName || 'COURSE PENDING'}
-                            </span>
-                            <span className="px-2 py-1 bg-slate-900 text-white rounded text-[8px] font-black uppercase tracking-widest leading-none">
-                              TRAINING ID: {res.trainingNo && res.trainingNo !== 'N/A' ? res.trainingNo : 'PENDING'}
-                            </span>
-                            {!res.email && (
-                              <span className="px-2 py-1 bg-red-100 text-red-600 rounded text-[8px] font-black uppercase tracking-widest leading-none">
-                                DISCREPANCY DETECTED
-                              </span>
-                            )}
+                <div className="space-y-4">
+                  {results
+                    .filter(res => {
+                      if (filter === 'with-email') return res.status === 'matched' || res.status === 'manual' || !!res.email;
+                      if (filter === 'no-email') return res.status === 'notfound' && !res.email;
+                      return true;
+                    })
+                    .map((res, idx) => (
+                    <motion.div 
+                      key={idx}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="bg-white border border-slate-200 rounded-3xl p-8 grid grid-cols-12 items-center hover:shadow-xl transition-all group"
+                    >
+                      <div className="col-span-1 text-slate-300 font-black font-mono text-xs">{res.candidateId || 'N/A'}</div>
+                      <div className="col-span-4">
+                        <p className="font-black text-2xl tracking-tighter leading-none mb-1 uppercase">{res.firstName} {res.lastName}</p>
+                        <div className="flex gap-2">
+                          <span className="px-2 py-1 bg-slate-100 text-slate-500 rounded text-[7px] font-black uppercase tracking-widest leading-none">
+                            {res.trainingName || 'COURSE PENDING'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="col-span-4 pr-12">
+                        {res.email ? (
+                          <div className="flex flex-col">
+                            <p className="font-mono text-sm text-slate-900 font-bold tracking-tight lowercase">{res.email}</p>
+                            <span className="text-[8px] font-black uppercase text-deloitte mt-1">Verified Match</span>
                           </div>
-                        </div>
-                        <div className="col-span-5 pr-8">
-                          {res.email ? (
-                            <div className="flex flex-col">
-                              <p className="font-mono text-xs text-slate-600 font-bold tracking-tight lowercase">{res.email}</p>
-                              {res.status === 'manual' && (
-                                <span className="text-[7px] font-black uppercase text-deloitte mt-1">Manual Override</span>
-                              )}
+                        ) : (
+                          <div className="flex flex-col gap-2">
+                            <div className="flex items-center gap-2 text-red-500">
+                              <AlertCircle className="w-3 h-3" />
+                              <span className="text-[8px] font-black uppercase tracking-widest">Not Found in Repository</span>
                             </div>
-                          ) : (
-                            <div className="flex flex-col gap-3">
-                              {res.matchOptions && res.matchOptions.length > 0 && (
-                                <div className="space-y-1.5">
-                                  <p className="text-[8px] font-black uppercase text-amber-600 tracking-widest flex items-center gap-1">
-                                    <AlertCircle className="w-2 h-2" />
-                                    Potential Matches Found:
-                                  </p>
-                                  <div className="flex flex-wrap gap-2">
-                                    {res.matchOptions.slice(0, 3).map((opt, i) => (
-                                      <button 
-                                        key={i}
-                                        onClick={() => updateResultEmail(idx, opt.email)}
-                                        className="h-8 px-3 border border-amber-200 bg-amber-50 rounded text-[9px] font-bold text-amber-800 hover:bg-amber-500 hover:text-white hover:border-amber-500 transition-all flex items-center gap-2"
-                                      >
-                                        <Search className="w-3 h-3 opacity-50" />
-                                        {opt.name} · {opt.email}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                              <div className="relative group/input">
-                                <input 
-                                  type="email" 
-                                  placeholder="IDENTIFY MANUALLY..."
-                                  className="w-full h-10 bg-slate-100 border border-slate-200 rounded px-4 text-[10px] font-black uppercase tracking-wider focus:bg-white focus:border-deloitte focus:outline-none transition-all placeholder:text-slate-400"
-                                  onBlur={(e) => e.target.value && updateResultEmail(idx, e.target.value)}
-                                  onKeyDown={(e) => e.key === 'Enter' && updateResultEmail(idx, (e.target as HTMLInputElement).value)}
-                                />
-                                <ExternalLink className="absolute right-3 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-300 pointer-events-none" />
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                        <div className="col-span-3 flex justify-end gap-2">
-                          <button 
+                            <input 
+                              type="email" 
+                              placeholder="MANUAL ENTRY..."
+                              className="w-full h-10 bg-slate-50 border border-slate-200 rounded-lg px-4 text-[10px] font-black uppercase tracking-wider focus:bg-white focus:border-deloitte focus:outline-none transition-all placeholder:text-slate-400"
+                              onBlur={(e) => e.target.value && updateResultEmail(idx, e.target.value)}
+                            />
+                          </div>
+                        )}
+                      </div>
+                      <div className="col-span-3 flex justify-end gap-3">
+                         <button 
                             onClick={() => handleMailto(res)}
                             disabled={!res.email}
-                            className="h-12 px-8 bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest rounded-lg shadow-lg hover:bg-deloitte hover:text-black transition-all flex items-center gap-2 disabled:opacity-10 group/btn"
+                            className="h-14 px-8 bg-black text-white text-[10px] font-black uppercase tracking-widest rounded-2xl shadow-lg hover:bg-deloitte hover:text-black transition-all flex items-center gap-2 disabled:opacity-5 group/btn"
                           >
-                            <Mail className="w-4 h-4 group-hover/btn:scale-110 transition-transform" />
-                            Initialize Nudge
+                            <Mail className="w-4 h-4" />
+                            Dispatch Nudge
                           </button>
-                        </div>
-                      </motion.div>
-                    ))
-                  ) : (
-                    <div className="h-full flex flex-col items-center justify-center p-20 text-slate-300 text-center">
-                      <Search className="w-16 h-16 mb-4 opacity-10" />
-                      <p className="font-black text-2xl tracking-widest uppercase">No Active Audit Session</p>
-                      <p className="text-[10px] font-black uppercase tracking-[0.3em] mt-3">Upload source files to begin the reconciliation process.</p>
-                    </div>
+                      </div>
+                    </motion.div>
+                  ))}
+
+                  {results.length === 0 && (
+                     <div className="h-64 flex flex-col items-center justify-center text-slate-300 border-2 border-dashed border-slate-200 rounded-3xl">
+                        <Search className="w-12 h-12 mb-4 opacity-10" />
+                        <p className="font-black text-lg tracking-[0.2em] uppercase">No Match Identified</p>
+                     </div>
                   )}
                 </div>
               </div>
-            </section>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -1304,47 +1034,6 @@ Audit Team`;
                   >
                     <ExternalLink className="w-5 h-5" />
                     Dispatch to Outlook
-                  </button>
-                </div>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* PDF Conversion Prompt Modal */}
-        <AnimatePresence>
-          {pdfToConvert && (
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-center justify-center p-8"
-            >
-              <motion.div 
-                initial={{ scale: 0.9 }}
-                animate={{ scale: 1 }}
-                className="bg-white rounded-3xl p-10 max-w-md w-full shadow-2xl text-center"
-              >
-                <div className="w-20 h-20 bg-deloitte/10 rounded-full flex items-center justify-center mx-auto mb-6">
-                  <FileText className="w-10 h-10 text-deloitte" />
-                </div>
-                <h3 className="text-2xl font-black uppercase tracking-tighter mb-2">Optimize Data Source?</h3>
-                <p className="text-slate-500 text-xs font-bold uppercase tracking-widest leading-relaxed mb-8">
-                  You uploaded {pdfToConvert.name}. Would you like to convert this PDF into a structured Excel document for better audit accuracy?
-                </p>
-                <div className="flex flex-col gap-3">
-                  <button 
-                    onClick={() => convertPDFToExcel(pdfToConvert)}
-                    className="h-14 bg-black text-white rounded-xl font-black uppercase tracking-widest hover:bg-deloitte hover:text-black transition-all flex items-center justify-center gap-3"
-                  >
-                    {isConverting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                    Convert to Excel
-                  </button>
-                  <button 
-                    onClick={() => setPdfToConvert(null)}
-                    className="h-14 border border-slate-200 rounded-xl font-black uppercase tracking-widest hover:bg-slate-50 transition-all text-slate-400"
-                  >
-                    Use Original PDF
                   </button>
                 </div>
               </motion.div>
