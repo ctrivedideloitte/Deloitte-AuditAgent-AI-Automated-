@@ -400,7 +400,7 @@ Kumar Raghavendra Venkata Raghav Aravapalli,vrkaravapalli@deloitte.com
   const getAI = () => {
     const key = process.env.GEMINI_API_KEY;
     if (!key || key === 'MY_GEMINI_API_KEY' || key === '') {
-      throw new Error("Gemini API key is missing. Please configure it in the 'Secrets' panel in AI Studio.");
+      throw new Error("Gemini API key is missing. Please configure it in the 'Secrets' panel (Settings -> Secrets) in AI Studio and restart the dev server if needed.");
     }
     return new GoogleGenAI({ apiKey: key });
   };
@@ -696,7 +696,7 @@ Audit Team`;
       // 3. Run Audit with Gemini
       const ai = getAI();
       const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
+        model: "gemini-3-flash-preview",
         contents: [
           {
             role: "user",
@@ -751,7 +751,7 @@ Audit Team`;
         }
       });
 
-      const resultText = (response as any).text || (response as any).response?.text?.() || "";
+      const resultText = response.text || "";
       const parsedResults: AuditResult[] = JSON.parse(resultText || "[]");
       setResults(parsedResults);
       saveCurrentSession(parsedResults);
@@ -1068,10 +1068,7 @@ Audit Team`;
                       .map(s => (
                       <div 
                         key={s.id}
-                        onClick={() => {
-                          setResults(s.metadata.results || []);
-                          setView('audit-step-3');
-                        }}
+                        onClick={() => loadSession(s.id)}
                         className="p-8 hover:bg-slate-50 transition-all cursor-pointer group flex justify-between items-center"
                       >
                         <div className="space-y-1">
