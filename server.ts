@@ -100,17 +100,31 @@ async function startServer() {
 
   // --- Google Auth (Sheets) ---
   app.get("/api/auth/google/url", (req, res) => {
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      getRedirectUri("google")
-    );
-    const url = oauth2Client.generateAuthUrl({
-      access_type: "offline",
-      scope: ["https://www.googleapis.com/auth/spreadsheets.readonly", "https://www.googleapis.com/auth/userinfo.profile", "https://www.googleapis.com/auth/userinfo.email"],
-      prompt: "consent",
-    });
-    res.json({ url });
+    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+      console.error("Missing Google OAuth Credentials in environment");
+      return res.status(500).json({ error: "Google OAuth credentials not configured on server" });
+    }
+
+    try {
+      const oauth2Client = new google.auth.OAuth2(
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_CLIENT_SECRET,
+        getRedirectUri("google")
+      );
+      const url = oauth2Client.generateAuthUrl({
+        access_type: "offline",
+        scope: [
+          "https://www.googleapis.com/auth/spreadsheets.readonly",
+          "https://www.googleapis.com/auth/userinfo.profile",
+          "https://www.googleapis.com/auth/userinfo.email"
+        ],
+        prompt: "consent",
+      });
+      res.json({ url });
+    } catch (err: any) {
+      console.error("Failed to generate Google Auth URL:", err);
+      res.status(500).json({ error: "Internal server error generating auth URL" });
+    }
   });
 
   app.get("/auth/google/callback", async (req, res) => {

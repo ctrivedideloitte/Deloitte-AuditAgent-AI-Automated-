@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import * as XLSX from 'xlsx';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -12,7 +12,10 @@ import {
   Loader2, 
   ExternalLink,
   ChevronRight,
-  ArrowRight
+  ArrowRight,
+  Lock,
+  Unlock,
+  Settings
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -66,6 +69,321 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState(false);
 
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [directoryFile, setDirectoryFile] = useState<File | null>(null);
+  
+  // Use user-specific keys for persistence
+  const getStorageKey = (suffix: string) => `deloitte_directory_${currentUser?.email || 'guest'}_${suffix}`;
+
+  const [directoryMetadata, setDirectoryMetadata] = useState<{ name: string, updatedAt: string, size: string } | null>(() => {
+    const email = currentUser?.email;
+    if (!email) return null;
+    const saved = localStorage.getItem(`deloitte_directory_${email}_meta`);
+    if (saved) return JSON.parse(saved);
+    
+    // Default initialization if no directory exists
+    const defaultMeta = {
+      name: 'Master_Directory_V1.csv',
+      updatedAt: new Date().toLocaleString(),
+      size: '4.2 KB'
+    };
+    return defaultMeta;
+  });
+
+  const [isDirectoryLocked, setIsDirectoryLocked] = useState(true);
+
+  // Initialize default content if missing
+  useEffect(() => {
+    if (!currentUser) return;
+
+    // Sync metadata if null (happens after login)
+    if (!directoryMetadata) {
+      const saved = localStorage.getItem(`deloitte_directory_${currentUser.email}_meta`);
+      if (saved) {
+        setDirectoryMetadata(JSON.parse(saved));
+      } else {
+        setDirectoryMetadata({
+          name: 'Master_Directory_V1.csv',
+          updatedAt: new Date().toLocaleString(),
+          size: '4.2 KB'
+        });
+      }
+    }
+
+    const contentKey = getStorageKey('content');
+    const metaKey = getStorageKey('meta');
+    if (!localStorage.getItem(contentKey)) {
+      const defaultCSV = `name,email
+"Devine, Sean",sedevine@deloitte.com
+"Saha , Barun",barsaha@deloitte.com
+"Thube, Gauri",gthube@deloitte.com
+"Mathew, Ansa",ansmathew@deloitte.com
+"Vamsi, Ramabathina",ravamsi@deloitte.com
+"Goenka, Mayank",magoenka@deloitte.com
+"S, Ramkumar",ramlnu@deloitte.com
+"M, Sruthi",sruthm@deloitte.com
+"Arora, Titiksha",tiarora@deloitte.com
+"BHASKAR, BATTALA",batbhaskar@deloitte.com
+"Viswa Teja, Adabala",aviswateja@deloitte.com
+"Smith, Ash",aybala@deloitte.com
+"Bandekar, Abhishek",abbandekar@deloitte.com
+"Bhargavi, Vayaluru",vaybhargavi@deloitte.com
+"Jha, Suman",sumajha@deloitte.com
+"Rai, Ekta",ekrai@deloitte.com
+"G, Sneha",sneg@deloitte.com
+"Soni, Shweta",shwsoni@deloitte.ie
+"Kumar, Varun",varunkumar6@deloitte.com
+"Ezzat, Ola",oezzat@deloitte.com
+"Halim, Nada",nhalim@deloitte.com
+"Venkateswarlu , M",vmuthyala.ext@deloitte.com
+"Aggarwal, Priyanshi",priyansh@deloitte.com
+Kumar Raghavendra Venkata Raghav Aravapalli,vrkaravapalli@deloitte.com
+"Y, Pradhiksha",pradhlnu@deloitte.com
+"Mac Coitir, Diarmuid",dmaccoitir@deloitte.ie
+"Maan, Harsh",hmaan@deloitte.com
+"Deshmukh, Shivathmika",shivatdeshmukh@deloitte.com
+"Guntreddy, Renuka",gurenuka@deloitte.com
+"Karmakar, Shruti",shrkarmakar@deloitte.com
+"Sachin Dahake, Vaishnav",vsachindahake@deloitte.com
+"Arora, Nikhil",nikhilarora@deloitte.com
+"Griffin, Niall",niagriffin@deloitte.ie
+"Jain, Dev",devjain6@deloitte.com
+"Kassiotis, Jamie",jkassiotis@deloitte.com
+"Desai, Arti",ardesai@deloitte.com
+"Popli, Labhesh",lpopli@deloitte.com
+"S, Karthiga",karthigas@deloitte.com
+"Jaiswal, Monika",mojaiswal@deloitte.com
+"Sajja, Tanuja",tsajja@deloitte.com
+"Verma , Shubham",shubhaverma@deloitte.com
+"Jawa, Bhumika",bhjawa@deloitte.com
+"Anand Kashikar, Vidya",vanandkashikar@deloitte.com
+"Malviya, Aadesh",aamalviya@deloitte.com
+"Hernandez, Alex",AlexanHernandez@deloitte.com
+"Poivey-Olson, Harrison",hpoivey-olson@deloitte.com
+"C M, Mahadevan",mahcm@deloitte.com
+"Mansfield, Chris",chmansfield@deloitte.ie
+"Rathore, Rajni",rajnirathore@deloitte.com
+"Magdy, Mina",mimagdy@deloitte.com
+"Haddad, Jack",jahaddad@deloitte.com
+"Amir, Elana",eamir@deloitte.com
+"McCarthy, Donnchadh",domccarthy@deloitte.ie
+"Mohapatra, Soumyajit",soumyajmohapatra@deloitte.com
+"Behera, Tanmay",tanbehera@deloitte.com
+"Babu, Shubhasmita",shubabu@deloitte.com
+"Plamada, Stefan-Sorin",splamada@deloitte.com
+"M, Russel",rmondayapurath@deloitte.ie
+"Kokate, Onkar",osubhashkokate@deloitte.com
+"Roy, Suraj",surroy@deloitte.com
+"Divakar T D, Suprith",sdivakartd@deloitte.com
+"Timbadia, Dhvani",dtimbadia@deloitte.com
+"Kodali, Anuhya",kanuhya@deloitte.com
+"Rehman U, Afsal",afsau@deloitte.com
+"Kumar, Tadipathri",tadipkumar@deloitte.com
+"Aman, Alwani,",aalwani@deloitte.com
+"Behera, Rudrakshya",rudbehera@deloitte.com
+"Daya, Dhiliban,",dadp@deloitte.com
+"Chen, Melissa",melischen@deloitte.com
+"O'Rourke, Cian",cianorourke@deloitte.ie
+"Prakasam, Medha",meprakasam@deloitte.ie
+"babu, Vijay, Vijay",vvijaybabu@deloitte.com
+"Tiwari, Shivangi",shivapathak@deloitte.com
+"Prabhakar, Tanvi",taprabhakar@deloitte.com
+"Banerjee, Abishek",abanerjee5@deloitte.com
+"Ray Doocey, John",jdoocey@deloitte.ie
+"Panchal, Shyam",shypanchal@deloitte.ie
+"Singh, Rashmi",rassingh@deloitte.ie
+"Gupta, Renu",rengupta@deloitte.com
+"Pasam, Mounika",mpasam@deloitte.com
+"Venkatesh, Chittimelli",chvenkatesh@deloitte.com
+"Srivastava, Rishabh",rishsrivastava@deloitte.com
+"Sudhakar Tawar, Sushil",sutawar@deloitte.com
+"reddy bobbili, Aditi",areddybobbili@deloitte.com
+"Maskar, Abishek",amaskar@deloitte.com
+"Shaikh, Anhar",anshaikh@deloitte.com
+"A, Prince",prina@deloitte.com
+"Saklani, Upasana",usaklani@deloitte.com
+"Raju, Kalyan",kalraju@deloitte.com
+"Burkholder, Nate",nburkholder@deloitte.com
+"Lingenfelter, Isaac",ilingenfelter@deloitte.com
+"Stoica, Ionut-Tudorel",iostoic@deloitte.com
+"Beniwal, Sahil",sbeniwal@deloitte.com
+"Gaurav, Limbore,",glimbore@deloitte.com
+"Suthar, Dheeraj",dhsuthar@deloitte.com
+"Bandu Godham, Omkar",ogodham@deloitte.com
+"LNU, Ravi",rlnu18@deloitte.com
+"Pal, Niharika",nihapal@deloitte.com
+"Hirphode, Niranjan",nhirphode@deloitte.com
+"Vijaya Lakshmi, Gandham, Sowmya",gsowmyavijayalaks@deloitte.com
+"Sayesh Reddy, Pallapolu",psayeshreddy@deloitte.com
+"Kumar, Sumit",sumitkumar67@deloitte.com
+"Barik, Satyajit",satbarik@deloitte.com
+"Kumar Biswal, Santosh",santobiswal@deloitte.com
+"Salvarajan, Praveen",prselvarajan@deloitte.com
+"Devi Natarajan, Nithya",nithnatarajan@deloitte.com
+"Sarkar, Sauvik",sauvsarkar@deloitte.com
+"K, Akshatha",akshathk@deloitte.com
+"Ranjan, Lalan",lranjan@deloitte.com
+"Dey, Prithviraj",pritdey@deloitte.com
+"Sabyasachi, Dey,",sabdey@deloitte.com
+"Sahebrao Chormale, Suraj",ssahebraochormale@deloitte.com
+"Acharyya, Sagnik",saacharyya@deloitte.com
+"Kishor Mali, Samadhan",skishormali@deloitte.com
+"Rishu, Kumar",kurishu@deloitte.com
+"Kedarisetti, Vishnu",vkedarisetti@deloitte.com
+"Pachauri, Ankit",ankpachauri@deloitte.com
+"Santhoshkumar, S",ssanthoshkumar2@deloitte.com
+"Bhapkar, Shivraj",sbhapkar@deloitte.com
+"Kumar G, Dinesh",dkumarg@deloitte.com
+"Bhargava, Kartik",kartbhargava@deloitte.com
+"Iqbal Shaikh, Anjum",anjshaikh@deloitte.com
+"Pullareddygari, Pravallika",ppullareddygari@deloitte.com
+"Jain, Madhur",madhurjain@deloitte.com
+"Kumar Gupta, Ankit",ankumargupta@deloitte.com
+"Panjwani, Akber",akpanjwani@deloitte.com
+"Yogeshvaran, S,",yogeshvs@deloitte.com
+"Anusha, T,",anushat@deloitte.com
+"Trivedi, Awadhesh",awtrivedi@deloitte.ie
+"Ravindra Reddy, Sirasani",sravindrareddy@deloitte.com
+"Srikanth, Nettem",nettsrikanth@deloitte.com
+"Kumar Annupoojari Anigalale, Akshay",aannupoojarianigalal@deloitte.com
+"Matt, Pan,",matpan@deloitte.com
+"Srivastava, Ayushman",ayushmsrivastava@deloitte.com
+"Kulkarni, Prathamesh",prathameskulkarni@deloitte.com
+"Bagwan, Mafaruk",mbagwan@deloitte.com
+"Mukherjee, Subarna",subamukherjee@deloitte.ie
+"Dutta, Aniket",anikdutta@deloitte.com
+"Acharya, Pratyush",pratyacharya@deloitte.com
+"Vidyananda Sagar, Boorle",bvidyanandasagar@deloitte.com
+"Yadav, Ranjeet",ranjeyadav@deloitte.com
+"P, Sargar",psagar9@deloitte.com
+"Trivedi, Chitransh",ctrivedi@deloitte.com
+"Davis, Kai",kdavis2@deloitte.com
+"Ramachandran, Sreekanth",sreramachandran@deloitte.com
+"Patel, Sunil",sunilpatel@deloitte.com
+"Sonawane, Saili",ssonawane@deloitte.com
+"Markandeya, Akshata",anerkar@deloitte.com
+"Shah, Rishil",rishilshah@deloitte.com
+"Naveena Spoorthi, Tankasala",ntankasala@deloitte.com
+"Travers, Patrick",ptravers@deloitte.ie
+"T, Sivakumar",sivt@deloitte.com
+"Tandon, Ojasvini",otandon@deloitte.ie
+"Madhukar, Vaibhav",vmadhukar@deloitte.com
+"Raj Ayyappa, Nagender",nayyappa@deloitte.com
+"Law, Dana",danalaw@deloitte.ie
+"Reddy Jakkam, Maheswar",mjakkam@deloitte.com
+"Gupta, Neha",negupta.ext@deloitte.com
+"Palanisamy, Thilakavathy",thpalanisamy@deloitte.com
+"Kumar, Shloka",shlkumar@deloitte.com
+"N Kumar, Varsha",varsnkumar@deloitte.com
+"Chang, Alice",alchang@deloitte.com
+"Lyons, Eimear",eilyons@deloitte.ie
+"Taher, Mohamad",mohataher@deloitte.com
+"Markle, Rich",rmarkle@deloitte.com
+"Abraham, Sonu",ssonuabraham@deloitte.com
+"O'Callaghan Smith, Orla",oocallaghansmith@deloitte.ie
+"Montoya, Daniel",damontoya@deloitte.com
+"Lynch, Deiric",deilynch@deloitte.ie
+"Hession, Etain",ehession@deloitte.ie
+"Barrie, Owen",obarrie@deloitte.ie
+"Vanarajan, Mullai",mvanarajan@deloitte.com
+"Rasamsetty, Anusha,",rasanusha@deloitte.com
+"Henry, Randy",rahenry@deloitte.com
+"Kumar , Dhiraj",dhirkumar@deloitte.com
+"Mendoza, Adrian",admendoza@deloitte.com
+"Akshaya, M,",akshayam@deloitte.com
+"Yadav, Pooja",pyadav29@deloitte.com
+"Hema, P,",hemap@deloitte.com
+"Kherha, Jasveer",jkherha@deloitte.com
+"Paramjyothi, Aketi",aparamjyothi@deloitte.com
+"Pawar, Akanksha",aamarjeetpawar@deloitte.com
+"Dand, Jinesha",jdand@deloitte.com
+"Kumar, Dhiraj",dhirkumar@deloitte.com
+"Sahu, Alok",alosahu@deloitte.com
+"B Bhandari, Lavanya",labhandari@deloitte.com
+"V G, Ramya",ramvg@deloitte.com
+"Fox, Craig",crfox@deloitte.com
+"Siddiq, Kamran",ksiddiq@deloitte.com
+"Merriman, Luke",lumerriman@deloitte.ie
+"Asfour, Ramez",raasfour@deloitte.com
+"Moroney, Brian",bmoroney@deloitte.ie
+"Kumar, Ashish",askumar10@deloitte.com
+"Marnane, Aidan",amarnane@deloitte.ie
+"Shree Venugopalan, Vidya",vidvenugopalan@deloitte.com
+"Kumar, Yogesh",ykumar5@deloitte.com
+"Eisenhut, Tanner",teisenhut@deloitte.com
+"Fahad, Mohammad",mfahad@deloitte.com
+"El-Hanafy, Nadin",nelhanafy@deloitte.com
+"Zoheb Jahagirdar, Mohammed",mjahagirdar@deloitte.com
+"Thomas, Shijo",shithomas@deloitte.com
+"Saini, Jatin",jatisaini@deloitte.com
+"Abdul Rab Ansari, Fareen",fabdulrabansari@deloitte.com
+"Vajula, Rajesh",rvajula@deloitte.com
+"Carroll, Riona",caitcarroll@deloitte.ie
+"Mourya, Nirbhay",nmourya@deloitte.com
+"Kumar, Sachin",skumar48@deloitte.ie
+"Surabhi, Sweta",ssurabhi@deloitte.com
+"Gopal, Priyanka",priygopal@deloitte.com
+"Ganguly, Varsha",vaganguly@deloitte.com
+"Bhaskaruni, Maheswari",mbhaskaruni@deloitte.com
+"Tomar, Sonali",sotomar@deloitte.com
+"Sharma, Manisha",manishasharma4@deloitte.com
+"Dash, Sushant",susdash@deloitte.com
+"Bhat, Aravinda",arbhat@deloitte.com
+"Gorai, Sandeep",sgorai@deloitte.com
+"Singh, Govind",gosingh@deloitte.com
+"Ghanukota, Sahaja",gsahaja@deloitte.com
+"O'Malley, Allan",alomalley@deloitte.ie
+"Hazra , Sourav",souhazra@deloitte.com
+"Suneelkumar, Parvatala",ksuneelkumar@deloitte.com
+"Gupta, Naman",ngupta65@deloitte.com
+"Wintz, Finn",fiwintz@deloitte.com
+"Pattanayak, Amrit",ampattanayak@deloitte.com
+"Shravya, Shravya",glshravya@deloitte.com
+"Das Mahapatra, Debanjan",ddasmahapatra@deloitte.com
+"Vasavi, Vasavi",kavasavi@deloitte.com
+"Lnu, Karthikeyan",karthikeyan73@deloitte.com
+"Butt, Nomaan",nombutt@deloitte.com
+"Cabrera, Stephanie",stcabrera@deloitte.com
+"Ferry, Zachary",zferry@deloitte.com
+"Shaikh Salaam, Jamesha",jshaikhsalaam@deloitte.com
+"G Nomula, Makarand",mgnomula@deloitte.com
+"Pani, Puratan",pupani@deloitte.com
+"Kota, Susmitha",susmkota@deloitte.com
+"Chateker, Sheetal",schateker@deloitte.com
+"Mahajan, Gaurav",gaurmahajan@deloitte.com
+"Bhatt, Pavitra",pabhatt.ext@deloitte.com
+"Ali Bohra, Hussain",hubohra@deloitte.com
+"Varige, Vidyasri,",vvidyasri@deloitte.com
+"Rohani, Ashkan",arohani@deloitte.com
+"Arroyo, Federico",farroyo@deloitte.com
+"Avani, Khoti,",avkhoti@deloitte.com
+"Prasannakumari, Matangi,",pramatangi@deloitte.com
+"Basak, Deeptesh",deebasak@deloitte.com
+"TS, Balaji",bats@deloitte.com
+"Rath, Debashish",derath@deloitte.com
+"Embiricos, Saya",sayuno@deloitte.com`;
+      localStorage.setItem(contentKey, defaultCSV);
+      localStorage.setItem(metaKey, JSON.stringify({
+        name: 'Master_Directory_V1.csv',
+        updatedAt: new Date().toLocaleString(),
+        size: '4.2 KB'
+      }));
+    }
+  }, [currentUser?.email]);
+
+  const saveDirectoryMetadata = async (file: File) => {
+    if (!currentUser) return;
+    const meta = {
+      name: file.name,
+      updatedAt: new Date().toLocaleString(),
+      size: (file.size / 1024).toFixed(1) + ' KB'
+    };
+    setDirectoryMetadata(meta);
+    localStorage.setItem(`deloitte_directory_${currentUser?.email}_meta`, JSON.stringify(meta));
+    
+    // Persist content user-specifically
+    const text = await extractTextFromFile(file);
+    localStorage.setItem(`deloitte_directory_${currentUser?.email}_content`, text);
+  };
   const [instruction, setInstruction] = useState("The source file (File A) is a definitive list of people who have NOT completed training. Extract their First Name, Last Name, Training Name, and Training No. Then, find their email addresses in the Directory (File B) and create nudge emails for them.");
   const [results, setResults] = useState<AuditResult[]>([]);
   const [filter, setFilter] = useState<'all' | 'with-email' | 'no-email'>('all');
@@ -119,10 +437,20 @@ export default function App() {
   const handleConnect = async (type: 'microsoft' | 'google') => {
     try {
       const res = await fetch(`/api/auth/${type}/url`);
-      const { url } = await res.json();
-      window.open(url, `${type}_oauth`, 'width=600,height=700');
-    } catch (e) {
-      setError(`Failed to initiate ${type} connection`);
+      const data = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(data.error || `Server returned ${res.status}`);
+      }
+
+      if (!data.url) {
+        throw new Error("No authorization URL received from server");
+      }
+
+      window.open(data.url, `${type}_oauth`, 'width=600,height=700');
+    } catch (e: any) {
+      console.error(`Oauth initialization error (${type}):`, e);
+      setError(`Failed to initiate ${type} connection: ${e.message}`);
     }
   };
 
@@ -170,6 +498,7 @@ export default function App() {
 
     setSessions(prev => {
       const existingIdx = prev.findIndex(s => s.id === activeSessionId);
+      if (!currentUser) return prev;
       const newSession: AuditSession = {
         id: activeSessionId,
         userName: currentUser.name,
@@ -315,15 +644,6 @@ Audit Team`;
   };
 
   const handleSyncAndTrigger = async () => {
-    if (!authStatus.google) {
-      setError("Please connect Google Sheets first. This is required for the Directory repository.");
-      handleConnect('google');
-      return;
-    }
-    if (!automationSettings.sourceId) {
-      setError("Please provide the Source of Truth Sheet ID.");
-      return;
-    }
     if (uploadedFiles.length === 0) {
       setError("Please upload at least one training file (PDF/Excel) to begin.");
       return;
@@ -336,11 +656,23 @@ Audit Team`;
     setView('audit-step-2');
 
     try {
-      // 1. Fetch Directory from Google Sheets
-      const sheetRes = await fetch(`/api/sheets/fetch?sheetId=${automationSettings.sourceId}`);
-      if (!sheetRes.ok) throw new Error("Google Sheets sync failed: " + (await sheetRes.json()).error);
-      const sheetData = await sheetRes.json();
-      const directoryText = `[DIRECTORY REPOSITORY FROM GOOGLE SHEETS]:\n${JSON.stringify(sheetData.values)}`;
+      // 1. Fetch Directory Persistent Storage OR Session Override
+      let directoryText = "";
+      const contentKey = `deloitte_directory_${currentUser?.email}_content`;
+      
+      if (isDirectoryLocked && directoryMetadata) {
+        const savedContent = localStorage.getItem(contentKey);
+        if (savedContent) {
+          directoryText = `[DIRECTORY REPOSITORY FROM PERSISTENT CACHE (${directoryMetadata.name})]:\n${savedContent.slice(0, 50000)}`;
+        } else {
+          throw new Error("Base directory content missing. Please re-upload on the dashboard.");
+        }
+      } else if (directoryFile) {
+        const text = await extractTextFromFile(directoryFile);
+        directoryText = `[DIRECTORY REPOSITORY FROM UPLOADED SESSION OVERRIDE ${directoryFile.name}]:\n${text.slice(0, 50000)}`;
+      } else {
+        throw new Error("No Directory available. Unlock to upload a session override or use the dashboard to set a base Excel.");
+      }
 
       // 2. Prepare Uploaded Files
       const fileParts = await Promise.all(uploadedFiles.map(async (file) => {
@@ -361,7 +693,7 @@ Audit Team`;
           {
             role: "user",
             parts: [
-              { text: "You are a Deloitte Audit Assistant. I am providing you with one or more Source files (uploaded by the user) and a Directory Repository from Google Sheets." },
+              { text: "You are a Deloitte Audit Assistant. I am providing you with one or more Source files (uploaded by the user) and a Directory Repository for reconciliation." },
               ...fileParts as any,
               { text: directoryText },
               {
@@ -591,71 +923,170 @@ Audit Team`;
             className="flex-1 p-20 flex flex-col gap-12 overflow-y-auto"
           >
             <div className="flex justify-between items-end">
-              <div>
+              <div className="space-y-4">
                 <h1 className="text-7xl font-black tracking-tighter leading-none uppercase">Project<br />Directory<span className="text-deloitte">.</span></h1>
-                <p className="text-slate-400 font-black uppercase text-sm tracking-[0.3em] mt-4">Welcome back, Agent {currentUser.name.split(' ')[0]}</p>
-              </div>
-              <div className="flex gap-4">
-                <div className="flex flex-col gap-1">
-                  <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">CC Persistence Memory</label>
-                  <input 
-                    value={ccMemory}
-                    onChange={(e) => setCcMemory(e.target.value)}
-                    placeholder="manager@deloitte.com; hr@deloitte.com"
-                    className="w-64 h-12 bg-white border border-slate-200 rounded-xl px-4 text-[10px] font-bold uppercase tracking-widest focus:border-deloitte focus:outline-none shadow-sm"
-                  />
+                <div className="flex items-center gap-6">
+                  <p className="text-slate-400 font-black uppercase text-sm tracking-[0.3em]">Welcome, Agent {currentUser.name}</p>
+                  <div className="h-4 w-px bg-slate-300"></div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 bg-deloitte rounded-full"></div>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">System Ready</span>
+                  </div>
                 </div>
-                <button 
-                  onClick={startNewSession}
-                  className="px-10 h-12 mt-auto bg-black text-white rounded-xl text-xs font-black uppercase tracking-[0.2em] hover:bg-deloitte hover:text-black transition-all shadow-2xl active:scale-95 flex items-center gap-3"
+              </div>
+              
+              <div className="flex gap-4">
+                 <button 
+                  onClick={() => setIsProcessing(!isProcessing)}
+                  className="px-6 h-16 border border-slate-200 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all flex items-center gap-2"
                 >
-                  <ArrowRight className="w-4 h-4" />
-                  Initialize New Audit
+                  <Settings className="w-4 h-4" />
+                  Quick Tools
                 </button>
               </div>
             </div>
 
-            <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-xl">
-              <div className="p-8 border-b border-slate-100 flex justify-between items-center">
-                <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Historical Session History</h3>
-                <span className="px-3 py-1 bg-slate-100 rounded text-[9px] font-black uppercase tracking-widest">
-                  {sessions.filter(s => s.userEmail === currentUser.email).length} Total Sessions
-                </span>
-              </div>
-              
-              <div className="divide-y divide-slate-100">
-                {sessions.filter(s => s.userEmail === currentUser.email).length === 0 ? (
-                  <div className="p-20 text-center text-slate-300">
-                    <FileText className="w-16 h-16 mx-auto mb-4 opacity-10" />
-                    <p className="font-black text-xl tracking-widest uppercase">No Prior Sessions Detected</p>
-                    <p className="text-[10px] font-black uppercase tracking-widest mt-2">Start a new session to begin auditing.</p>
-                  </div>
-                ) : (
-                  sessions.filter(s => s.userEmail === currentUser.email).map(s => (
-                    <div 
-                      key={s.id}
-                      className="group p-8 flex items-center hover:bg-slate-50 transition-all cursor-pointer"
-                      onClick={() => loadSession(s.id)}
-                    >
-                      <div className="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400 group-hover:bg-deloitte group-hover:text-black transition-colors shrink-0">
-                        <FileText className="w-6 h-6" />
-                      </div>
-                      <div className="ml-6 flex-1">
-                        <h4 className="text-xl font-black tracking-tighter uppercase">{s.name}</h4>
-                        <div className="flex gap-4 mt-1">
-                          <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Created: {new Date(s.timestamp).toLocaleDateString()}</span>
-                          <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">{s.resultCount} Targets Audited</span>
+            <div className="grid grid-cols-12 gap-8">
+              {/* Directory Management Card */}
+              <div className="col-span-12 lg:col-span-5 space-y-6">
+                <div className="bg-black text-white p-10 rounded-3xl space-y-8 shadow-2xl relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 w-64 h-64 bg-deloitte/10 blur-[100px] -translate-y-1/2 translate-x-1/2"></div>
+                  
+                  <div className="relative z-10">
+                    <h3 className="text-xs font-black uppercase tracking-[0.3em] text-deloitte mb-6 flex items-center gap-3">
+                      <FileText className="w-4 h-4" />
+                      Directory Repository
+                    </h3>
+                    
+                    {directoryMetadata ? (
+                      <div className="space-y-6">
+                        <div>
+                          <p className="text-4xl font-black tracking-tighter uppercase leading-tight mb-2 truncate group-hover:text-deloitte transition-colors">{directoryMetadata.name}</p>
+                          <div className="flex items-center gap-3">
+                            <span className="px-2 py-1 bg-white/10 text-[9px] font-black uppercase tracking-widest rounded">
+                              {directoryMetadata.size}
+                            </span>
+                            <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">
+                              Updated {directoryMetadata.updatedAt}
+                            </span>
+                          </div>
+                        </div>
+                        
+                        <div className="p-4 bg-white/5 border border-white/10 rounded-2xl">
+                          <p className="text-[10px] font-bold text-slate-300 uppercase leading-relaxed tracking-wider">
+                            <span className="text-deloitte">IMPORTANT:</span> This is your persistent base Excel used for all audit reconciliations. If you have a more updated master list, replace it here.
+                          </p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-4">
-                        <span className={`px-2 py-1 rounded text-[8px] font-black uppercase tracking-widest ${s.status === 'completed' ? 'bg-[#E6F4D7] text-black' : 'bg-slate-200 text-slate-600'}`}>
-                          {s.status}
-                        </span>
-                        <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-black group-hover:translate-x-1 transition-all" />
+                    ) : (
+                      <div className="space-y-4">
+                        <p className="text-slate-400 text-xs font-bold uppercase tracking-widest leading-relaxed">
+                          No base directory found. Upload the master Employee List to enable reconciliation.
+                        </p>
                       </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-4 relative z-10">
+                    <button 
+                      onClick={() => {
+                        const input = document.createElement('input');
+                        input.type = 'file';
+                        input.accept = '.xlsx, .xls, .csv';
+                        input.onchange = (e) => {
+                          const file = (e.target as HTMLInputElement).files?.[0];
+                          if (file) {
+                            saveDirectoryMetadata(file);
+                          }
+                        };
+                        input.click();
+                      }}
+                      className="w-full h-14 bg-white text-black rounded-xl font-black uppercase tracking-widest hover:bg-deloitte transition-all flex items-center justify-center gap-3 shadow-xl"
+                    >
+                      <Upload className="w-4 h-4" />
+                      Update Base Repository
+                    </button>
+
+                    <button 
+                      onClick={startNewSession}
+                      className="w-full h-16 bg-deloitte text-black rounded-xl text-xs font-black uppercase tracking-[0.2em] hover:bg-black hover:text-white transition-all shadow-2xl active:scale-95 flex items-center justify-center gap-3"
+                    >
+                      <Search className="w-5 h-5" />
+                      Initialize New Audit
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-8 border border-slate-200 rounded-3xl bg-white shadow-sm">
+                  <div className="flex justify-between items-center mb-4">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">CC Persistence Memory</label>
+                    <Mail className="w-4 h-4 text-slate-300" />
+                  </div>
+                  <input 
+                    value={ccMemory}
+                    onChange={(e) => setCcMemory(e.target.value)}
+                    placeholder="manager@deloitte.com; hr@deloitte.com"
+                    className="w-full h-14 bg-slate-50 border border-slate-100 rounded-xl px-6 text-xs font-bold uppercase tracking-widest focus:border-deloitte focus:outline-none transition-all"
+                  />
+                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-4 leading-relaxed">
+                    Set a persistent list of BCC recipients that will be automatically added to all outgoing nudges.
+                  </p>
+                </div>
+              </div>
+
+              {/* Session History List */}
+              <div className="col-span-7 bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm flex flex-col">
+                <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500">Historical Audit Records</h3>
+                  <div className="flex gap-2">
+                    <span className="px-3 py-1 bg-white border border-slate-200 rounded-full text-[9px] font-black uppercase tracking-widest text-slate-500 shadow-sm">
+                      {sessions.filter(s => s.userEmail === currentUser?.email).length} Records
+                    </span>
+                  </div>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto divide-y divide-slate-100 min-h-[400px]">
+                  {sessions.filter(s => s.userEmail === currentUser?.email).length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center p-20 text-center text-slate-300">
+                      <FileText className="w-12 h-12 mx-auto mb-4 opacity-10" />
+                      <p className="font-black text-lg tracking-widest uppercase">Vault Empty</p>
+                      <p className="text-[10px] font-black uppercase tracking-widest mt-2">Initialize an audit to create a record.</p>
                     </div>
-                  ))
-                )}
+                  ) : (
+                    sessions
+                      .filter(s => s.userEmail === currentUser?.email)
+                      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+                      .map(s => (
+                      <div 
+                        key={s.id}
+                        onClick={() => {
+                          setResults(s.metadata.results || []);
+                          setView('audit-step-3');
+                        }}
+                        className="p-8 hover:bg-slate-50 transition-all cursor-pointer group flex justify-between items-center"
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-3">
+                            <span className="text-xl font-black uppercase tracking-tighter group-hover:text-deloitte transition-colors">Audit #{s.id.slice(-4)}</span>
+                            <span className="px-2 py-0.5 bg-black text-white text-[8px] font-black uppercase tracking-widest rounded-full">
+                              Completed
+                            </span>
+                          </div>
+                          <div className="flex gap-3 text-[10px] items-center">
+                            <span className="text-slate-400 font-bold uppercase tracking-widest">{new Date(s.timestamp).toLocaleDateString()}</span>
+                            <span className="w-1 h-1 bg-slate-200 rounded-full"></span>
+                            <span className="text-slate-500 font-black uppercase tracking-widest">
+                              {s.resultCount || 0} Targets Audited
+                            </span>
+                          </div>
+                        </div>
+                        <div className="w-12 h-12 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center group-hover:bg-black group-hover:text-white transition-all">
+                          <ChevronRight className="w-5 h-5" />
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             </div>
           </motion.div>
@@ -678,30 +1109,91 @@ Audit Team`;
                   </p>
                 </div>
 
-                <div className="p-8 bg-black rounded-3xl border border-slate-800 space-y-6">
-                  <h3 className="text-xs font-black uppercase tracking-widest text-deloitte flex items-center gap-2">
-                    <div className="w-2 h-2 bg-deloitte rounded-full"></div>
-                    Directory Repository
-                  </h3>
-                  <div>
-                    <label className="text-[8px] font-black uppercase tracking-widest text-slate-500 block mb-2">Connected Source of Truth (Google Sheets)</label>
-                    <div className="flex gap-2">
-                      <input 
-                        value={automationSettings.sourceId}
-                        onChange={(e) => setAutomationSettings(s => ({ ...s, sourceId: e.target.value }))}
-                        className="flex-1 h-12 bg-slate-900 border border-slate-800 rounded-xl px-4 text-[11px] font-mono text-deloitte focus:border-deloitte focus:outline-none"
-                        placeholder="Google Sheet ID"
-                      />
-                      {!authStatus.google && (
-                        <button 
-                          onClick={() => handleConnect('google')}
-                          className="h-12 px-4 bg-slate-800 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-white hover:text-black transition-all"
-                        >
-                          Link
-                        </button>
-                      )}
-                    </div>
+                <div className="p-8 bg-black rounded-3xl border border-slate-800 space-y-6 relative overflow-hidden">
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-xs font-black uppercase tracking-widest text-deloitte flex items-center gap-2">
+                      <div className="w-2 h-2 bg-deloitte rounded-full"></div>
+                      Directory Repository
+                    </h3>
+                    {directoryMetadata && (
+                      <button 
+                        onClick={() => setIsDirectoryLocked(!isDirectoryLocked)}
+                        className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${isDirectoryLocked ? 'bg-slate-800 text-slate-400' : 'bg-deloitte text-black'}`}
+                      >
+                        {isDirectoryLocked ? <Lock className="w-2 h-2" /> : <Unlock className="w-2 h-2" />}
+                        {isDirectoryLocked ? 'Locked' : 'Unlocked'}
+                      </button>
+                    )}
                   </div>
+
+                  <AnimatePresence mode="wait">
+                    {isDirectoryLocked && directoryMetadata ? (
+                      <motion.div 
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        key="locked"
+                        className="space-y-4"
+                      >
+                        <div>
+                          <p className="text-white text-2xl font-black uppercase tracking-tighter truncate">{directoryMetadata.name}</p>
+                          <p className="text-slate-500 text-[8px] font-bold uppercase tracking-[0.2em] mt-1">LATEST UPDATED SOURCE · {directoryMetadata.updatedAt}</p>
+                        </div>
+                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">
+                          This base directory is currently active for this session. Unlock to replace with a temporary session repository.
+                        </p>
+                      </motion.div>
+                    ) : (
+                      <motion.div 
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        key="unlocked"
+                        className="space-y-4"
+                      >
+                         {directoryFile ? (
+                            <div className="p-4 bg-slate-900 border border-deloitte/30 rounded-xl flex items-center justify-between">
+                              <div className="flex items-center gap-3 overflow-hidden">
+                                <FileText className="w-5 h-5 text-deloitte shrink-0" />
+                                <div>
+                                  <p className="text-[10px] font-black uppercase text-white truncate">{directoryFile.name}</p>
+                                  <p className="text-[8px] font-bold text-deloitte uppercase tracking-widest">Session Override Ready</p>
+                                </div>
+                              </div>
+                              <button 
+                                onClick={() => setDirectoryFile(null)}
+                                className="text-slate-500 hover:text-white"
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="space-y-4">
+                              <div>
+                                <label className="text-[8px] font-black uppercase tracking-widest text-slate-500 block mb-2">Upload Session Override (Excel/CSV)</label>
+                                <button 
+                                  onClick={() => {
+                                    const input = document.createElement('input');
+                                    input.type = 'file';
+                                    input.accept = '.xlsx, .xls, .csv';
+                                    input.onchange = (e) => {
+                                      const file = (e.target as HTMLInputElement).files?.[0];
+                                      if (file) setDirectoryFile(file);
+                                    };
+                                    input.click();
+                                  }}
+                                  className="w-full h-12 border border-dashed border-slate-700 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:border-deloitte hover:text-white transition-all flex items-center justify-center gap-2"
+                                >
+                                  <Upload className="w-4 h-4" />
+                                  Choose Session File
+                                </button>
+                                <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mt-2">Note: This will only be used for the current audit session.</p>
+                              </div>
+                            </div>
+                          )}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               </div>
 
@@ -753,7 +1245,7 @@ Audit Team`;
                     
                     <button 
                       onClick={handleSyncAndTrigger}
-                      disabled={isSyncing || uploadedFiles.length === 0}
+                      disabled={isSyncing || uploadedFiles.length === 0 || (!directoryFile && !automationSettings.sourceId)}
                       className="w-full h-20 bg-deloitte text-black rounded-3xl font-black uppercase tracking-[0.4em] hover:bg-black hover:text-white transition-all shadow-2xl mt-4 flex items-center justify-center gap-4 group active:scale-95"
                     >
                       {isSyncing ? <Loader2 className="w-6 h-6 animate-spin" /> : "Run Automated Audit"}
